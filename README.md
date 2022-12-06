@@ -15,3 +15,7 @@ Required features for MVP:
 7. Personal user area for inner and outer CV
 
 All pieces of project could be discussed and changed
+
+# CURRENT TASK:
+Continue follow instructions:
+https://youtube.com/watch?v=RcQwcyyCOmM&feature=share&utm_source=EKLEiJECCKjOmKnC5IiRIQ&t=1749
