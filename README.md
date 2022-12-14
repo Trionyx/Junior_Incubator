@@ -17,4 +17,4 @@ Required features for MVP:
 All pieces of project could be discussed and changed
 
 # CURRENT TASK:
-Make config file connection from both api and frontend
+Make basic thing in personal area
