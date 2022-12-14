@@ -17,5 +17,4 @@ Required features for MVP:
 All pieces of project could be discussed and changed
 
 # CURRENT TASK:
-Continue follow instructions:
-https://youtube.com/watch?v=RcQwcyyCOmM&feature=share&utm_source=EKLEiJECCKjOmKnC5IiRIQ&t=1749
+Make config file connection from both api and frontend

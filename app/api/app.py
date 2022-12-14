@@ -2,8 +2,11 @@ from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 
+from config import DevConfig
+
+
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:nWRbi0HR0xYSXQxW60tH@containers-us-west-91.railway.app:7328/railway'
+app.config.from_object(DevConfig)
 db = SQLAlchemy(app)
 
 # for DB table creation in db_create.py
@@ -46,7 +49,7 @@ def create_event():
 
 
 # get all events
-@app.route('/events', methods=['GET'])
+@app.route('/events', methods=['GET'])  # TODO BUG - operation successfully, but showing "Bad request syntax ('{')"
 def get_events():
     events = Event.query.order_by(Event.id.asc()).all()
     event_list = []
@@ -58,7 +61,7 @@ def get_events():
 # get single event
 @app.route('/events/<event_id>', methods=['GET'])
 def get_event(event_id):  # event_id here == id from tutorial  # TODO remove comment here at the end
-    event = Event.query.filter_by(event_id=event_id).one()
+    event = Event.query.filter_by(id=event_id).one()
     formatted_event = format_event(event)
     return {'event': formatted_event}
 
