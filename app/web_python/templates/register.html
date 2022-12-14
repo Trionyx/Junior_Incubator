@@ -1,4 +1,5 @@
-<!DOCTYPE html>
+{% extends "basic_view.html" %}
+
 <html lang="en">
 
 <head>
@@ -8,17 +9,36 @@
     <title>Register</title>
 </head>
 
+{% block body %}
 <body>
-    <h1>Register Page</h1>
+    <h1>Junior incubator signup</h1>
+<div class="page-single">
+    <div class="container">
+        <div class="row">
+            <div class="col col-login mx-auto">
+                <form method="POST" action="" role="form" class="card">
 
-    <form method="POST" action="">
-        {{ form.hidden_tag() }}
-        {{ form.username }}
-        {{ form.password }}
-        {{ form.submit }}
-    </form>
+                    <div class="card-body p-6">
+                        <div class="card-title">Login</div>
+                            {{ form.hidden_tag() }}
+                             {{ form.username }}
+                             {{ form.password }}
+                            {{ form.submit }}
+                        <div class="card-body p-6">
+                        <small>
+                            <a href="{{ url_for('login') }}">Already have an account? Log In</a>
+                        </small>
+                        </div>
+                    </div>
+                </form>
+                <div class="text-center text-muted">
+                    <hr class="thin" />
+                </div>
 
-    <a href="{{ url_for('login') }}">Already have an account? Log In</a>
+            </div>
+        </div>
+    </div>
+</div>
 </body>
 
-</html>
+{% endblock %}
