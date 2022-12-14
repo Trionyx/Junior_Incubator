@@ -6,11 +6,14 @@ from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import InputRequired, Length, ValidationError
 from flask_bcrypt import Bcrypt
 
+from config import DevConfig, Config
+
 app = Flask(__name__)
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-app.config['SECRET_KEY'] = 'thisisasecretkey'
+app.config.from_object(DevConfig)
+app.config.from_object(Config)
+# Default SECRET_KEY: app.config['SECRET_KEY'] = 'thisisasecretkey'
 
 
 login_manager = LoginManager()
