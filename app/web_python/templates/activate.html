@@ -1,0 +1,38 @@
+{% extends "basic_view.html" %}
+
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activation page</title>
+</head>
+
+{% block body %}
+<body>
+    <h1>Junior incubator Activation Page</h1>
+<div class="page-single">
+    <div class="container">
+        <div class="row">
+            <div class="col col-login mx-auto">
+                <form method="POST" action="" role="form" class="card">
+
+                    <div class="card-body p-6">
+                        <div class="card-title">Input activation code here</div>
+                            {{ form.hidden_tag() }}
+                             {{ form.activation_code }}
+                            {{ form.submit }}
+                    </div>
+                </form>
+                <div class="text-center text-muted">
+                    <hr class="thin" />
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+
+{% endblock %}
