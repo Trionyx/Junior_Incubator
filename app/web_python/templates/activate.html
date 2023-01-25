@@ -19,6 +19,15 @@
                 <form method="POST" action="" role="form" class="card">
 
                     <div class="card-body p-6">
+                        {% with messages = get_flashed_messages() %}
+                          {% if messages %}
+                            <ul class=flashes>
+                            {% for message in messages %}
+                              <li>{{ message }}</li>
+                            {% endfor %}
+                            </ul>
+                          {% endif %}
+                        {% endwith %}
                         <div class="card-title">Input activation code here</div>
                             {{ form.hidden_tag() }}
                              {{ form.activation_code }}
