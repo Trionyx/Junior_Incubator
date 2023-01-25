@@ -1,15 +1,15 @@
+
 from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_restful import Api, Resource, reqparse, abort, fields, marshal_with
 from flask_mail import Mail, Message
-from datetime import datetime
+from datetime import datetime, timedelta
 import functools
-import jwt
+import jwt  # here you need PyJWT, no just jwt
 import re
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from config import Config, DevConfig
-
 
 app = Flask(__name__)
 app.config.from_object(DevConfig)
@@ -22,24 +22,12 @@ api = Api(app)
 context = app.app_context()
 
 
-# Old db.model
-class Event(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    description = db.Column(db.String(100), nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow())
-
-    def __repr__(self):
-        return f'Event: {self.description}'
-
-    def __init__(self, description):
-        self.description = description
-
-
-class User(db.Model):
+class Users(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(100), nullable=False)
     password = db.Column(db.String(128), nullable=False)
+    active = db.Column(db.Boolean, nullable=False, default=False)
     date_joined = db.Column(db.DateTime, nullable=False, default=datetime.utcnow())
     user_language = db.Column(db.String(2), nullable=False, default="EN")  # ISO 639-1 format
     speciality_main = db.Column(db.String(128), nullable=True)
@@ -53,49 +41,70 @@ class User(db.Model):
     def __repr__(self):
         return f'User: {self.username}'
 
-    def __init__(self, username):
+    def __init__(self, username, email, password, active):
         self.username = username
+        self.email = email
+        self.password = password
+        self.active = active
 
 
 def login_required(method):
+    """
+    Decorator for checking if user is logged in
+    Here you have to send token in http header using Bearer token, created on login
+    """
+
     @functools.wraps(method)
     def wrapper(self):
         header = request.headers.get('Authorization')
-        token = header.split()
+        _, token = header.split()  # non-token header part ignoring
         try:
-            decoded = jwt.decode(token, app.config['SECRET_KEY '], algorithms='HS256')
+            decoded = jwt.decode(token, app.config['SECRET_KEY'], algorithms='HS256')
         except jwt.DecodeError:
             abort(400, message='Token is not valid.')
         except jwt.ExpiredSignatureError:
             abort(400, message='Token is expired.')
         email = decoded['email']
-        if db.users.find({'email': email}).count() == 0:
+        if not Users.query.filter_by(email=email).first():
             abort(400, message='User is not found.')
-        user = db.users.find_one({'email': email})
+        user = Users.query.filter_by(email=email).first()
         return method(self, user)
+
     return wrapper
 
 
 class Register(Resource):
     def post(self):
+        username = request.json['username']
         email = request.json['email']
         password = request.json['password']
         if not re.match(r'^[A-Za-z0-9\.\+_-]+@[A-Za-z0-9\._-]+\.[a-zA-Z]*$', email):
             abort(400, message='email is not valid.')
-        if len(password) < 6:
+        if len(password) < 8:
             abort(400, message='password is too short.')
-        if db.users.find({'email': email}).count() != 0:
-            if db.users.find_one({'email': email})['active']:
+        print(f"email: {email}")  # TEMP
+        if Users.query.filter_by(email=email).first():
+            print(f'user has been found: {Users.query.filter_by(email=email).first()}')
+            if Users.query.filter_by(email=email, active=True):  # Check only active user email existence
                 abort(400, message='email is already used.')
         else:
-            db.users.insert_one({'email': email, 'password': generate_password_hash(password), 'active': False})
-        exp = datetime.datetime.utcnow() + datetime.timedelta(days=app.config['ACTIVATION_EXPIRE_DAYS'])
+            db.session.add(Users(
+                username=username,
+                email=email,
+                password=generate_password_hash(password),
+                active=False,
+            ))
+            db.session.commit()
+        exp = datetime.utcnow() + timedelta(days=app.config['ACTIVATION_EXPIRE_DAYS'])
         encoded = jwt.encode({'email': email, 'exp': exp},
-                             app.config['SECRET_KEY '], algorithm='HS256')
-        message = 'Hello\nactivation_code={}'.format(encoded.decode('utf-8'))
+                             app.config['SECRET_KEY'], algorithm='HS256')
+        message = f'Hello\nactivation_code = \n{encoded}'
         msg = Message(recipients=[email],
                       body=message,
-                      subject='Activation Code')
+                      subject='Junior Incubator Activation')
+        # FIXME don't save user in DB if can't send email or make method for resend
+        # main problem is that Mailgunt can't send emails to unverified emails
+        # TODO also need async code here
         mail.send(msg)
         return {'email': email}
 
@@ -104,108 +113,69 @@ class Activate(Resource):
     def put(self):
         activation_code = request.json['activation_code']
         try:
-            decoded = jwt.decode(activation_code, app.config['SECRET_KEY '], algorithms='HS256')
+            decoded = jwt.decode(activation_code, app.config['SECRET_KEY'], algorithms='HS256')
         except jwt.DecodeError:
             abort(400, message='Activation code is not valid.')
         except jwt.ExpiredSignatureError:
             abort(400, message='Activation code is expired.')
         email = decoded['email']
-        db.users.update({'email': email}, {'$set': {'active': True}})
+        user_activation = Users.query.filter_by(email=email).first()
+        user_activation.active = True
+        db.session.commit()
         return {'email': email}
 
 
 class Login(Resource):
     def get(self):
         email = request.json['email']
-        password = request.json['password']
-        if db.users.find({'email': email}).count() == 0:
+        login_password = request.json['password']
+        if not Users.query.filter_by(email=email).first():
             abort(400, message='User is not found.')
-        user = db.users.find_one({'email': email})
-        if not check_password_hash(user['password'], password):
+        db_user = Users.query.filter_by(email=email).first()
+        if not check_password_hash(db_user.password, login_password):
             abort(400, message='Password is incorrect.')
-        exp = datetime.datetime.utcnow() + datetime.timedelta(hours=app.config['TOKEN_EXPIRE_HOURS'])
-        encoded = jwt.encode({'email': email, 'exp': exp},
-                             app.config['SECRET_KEY '], algorithm='HS256')
-        return {'email': email, 'token': encoded.decode('utf-8')}
+        exp = datetime.utcnow() + timedelta(hours=app.config['TOKEN_EXPIRE_HOURS'])
+        encoded_token = jwt.encode({'email': email, 'exp': exp},
+                                   app.config['SECRET_KEY'], algorithm='HS256')
+        return {'email': email, 'token': encoded_token}
+
+
+# Check cookies and session
+class Cookie(Resource):
+    @login_required
+    def get(self, user):
+        print(f"{user} is logged in")  # TEMP
+        return {'email': user.email}
 
 
 # dashboard starts here
-class Todo(Resource):
-    @login_required
+class Dashboard(Resource):
+    @login_required  # Only work with http authorization header with Bearer token
     def get(self, user):
-        return {'email': user['email']}
+
+        return {'email': user.email}
+
+
+class Todo(Resource):
+    @login_required  # Only work with http authorization header with Bearer token
+    def get(self, user):
+        task_name = request.json['name']
+        task_description = request.json['description']
+        print(f"task_name: {task_name}")
+        print(f"task_description: {task_description}")
+        return {'email': user.email}
 
 
 api.add_resource(Register, '/v1/register')
 api.add_resource(Activate, '/v1/activate')
 api.add_resource(Login, '/v1/login')
 api.add_resource(Todo, '/v1/todo')
-
-
-"""
-Old API on requests TODO remove when finish Restful
-"""
-
-
-def format_event(event):
-    return {
-        "description": event.description,
-        "id": event.id,
-        "created_at": event.created_at,
-    }
-
-
-@app.route('/')
-def hello():
-    return 'Hey!'
-
-
-# create an event
-@app.route('/events', methods=['POST'])
-def create_event():
-    description = request.json['description']
-    event = Event(description)
-    db.session.add(event)
-    db.session.commit()
-    return format_event(event)
-
-
-# get all events
-@app.route('/events', methods=['GET'])  # TODO BUG - operation successfully, but showing "Bad request syntax ('{')"
-def get_events():
-    events = Event.query.order_by(Event.id.asc()).all()
-    event_list = []
-    for event in events:
-        event_list.append(format_event(event))
-    return {'events': event_list}
-
-
-# get single event
-@app.route('/events/<event_id>', methods=['GET'])
-def get_event(event_id):  # event_id here == id from tutorial  # TODO remove comment here at the end
-    event = Event.query.filter_by(id=event_id).one()
-    formatted_event = format_event(event)
-    return {'event': formatted_event}
-
-
-# delete an event
-@app.route('/events/<event_id>', methods=['DELETE'])
-def delete_event(event_id):
-    event = Event.query.filter_by(id=event_id).one()
-    db.session.delete(event)
-    db.session.commit()
-    return f'Event (event_id: {event_id}) deleted '
-
-
-# edit an event
-@app.route('/events/<event_id>', methods=['PUT'])
-def update_event(event_id):
-    event = Event.query.filter_by(id=event_id)
-    description = request.json['description']
-    event.update(dict(description=description, created_at=datetime.utcnow()))
-    db.session.commit()
-    return {'event': format_event(event.one())}
+api.add_resource(Dashboard, '/v1/dashboard')
+api.add_resource(Cookie, '/v1/cookie')
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='127.0.0.1', port=3000)
+
+
+# based on: https://github.com/oliverSI/flask-restful-authentication/blob/master/app/api.py

@@ -1,59 +1,81 @@
-import flask_bcrypt
-from flask import Flask, render_template, url_for, redirect
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import UserMixin, login_user, LoginManager, login_required, logout_user, current_user
-from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SubmitField
-from wtforms.validators import InputRequired, Length, ValidationError
-from flask_bcrypt import Bcrypt
 
-from config import DevConfig, Config
+import requests
+import functools
+
+from flask import Flask, render_template, url_for, redirect, request, make_response, flash
+from flask_wtf import FlaskForm
+from wtforms import StringField, PasswordField, SubmitField, EmailField
+from wtforms.validators import InputRequired, Length
+from flask_bcrypt import Bcrypt  # to send password to API safely
+
+from config import Config, API_URL
 
 app = Flask(__name__)
-db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
-app.config.from_object(DevConfig)
+
 app.config.from_object(Config)
-# Default SECRET_KEY: app.config['SECRET_KEY'] = 'thisisasecretkey'
+api_url = API_URL
 
 
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = 'login'
+def api_session_check(token):
+    """
+    requesting session from restapi
+    """
+    response = requests.get(api_url + '/cookie', headers={
+        'Authorization': f'Bearer {token}',
+    })
+    return response
 
 
-@login_manager.user_loader
-def load_user(user_id):
-    return Users.query.get(int(user_id))
+def login_required(method):
+    """
+    Decorator for checking if user have token in cookies
+    """
+    @functools.wraps(method)
+    def wrapper():
+        print(f'url for: {url_for(f"{method.__name__}")}')  # TMP
+        token = request.cookies.get('LOGIN_INFO')
+        if not token:
+            flash('Your session expired, login again please')
+            return redirect(url_for('login'))
 
+        print(f'@login_required passed with token: {token}')  # TMP
 
-class Users(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(20), nullable=False, unique=True)
-    password = db.Column(db.String(80), nullable=False)
+        response = api_session_check(token)
+        print(f'api_session_check response: {response}')  # TMP
+        if response.status_code != 200:
+            flash('Your API session expired, login again please')
+            return redirect(url_for('login'))
+
+        return method(token)
+
+    return wrapper
 
 
 class RegisterForm(FlaskForm):
     username = StringField(validators=[
                            InputRequired(), Length(min=4, max=20)], render_kw={"placeholder": "Username"})
+    email = EmailField(validators=[
+                       InputRequired(), Length(min=4, max=50)], render_kw={"placeholder": "Email"})
 
     password = PasswordField(validators=[
                              InputRequired(), Length(min=8, max=20)], render_kw={"placeholder": "Password"})
 
     submit = SubmitField('Register')
 
-    def validate_username(self, username):
-        existing_user_username = Users.query.filter_by(
-            username=username.data).first()
-        if existing_user_username:
-            raise ValidationError(
-                'That username already exists. Please choose a different one.')
+
+class ActivationForm(FlaskForm):
+    activation_code = StringField(validators=[
+                           InputRequired(), Length(min=4, max=160)], render_kw={"placeholder": "Activation code"})
+    submit = SubmitField('Activate')
 
 
 class LoginForm(FlaskForm):
-    username = StringField(validators=[
-                           InputRequired(), Length(min=4, max=20)], render_kw={"placeholder": "Username"})
-
+    # if username will be needed
+    # username = StringField(validators=[
+    #                        InputRequired(), Length(min=4, max=20)], render_kw={"placeholder": "Username"})
+    email = EmailField(validators=[InputRequired(), Length(min=4, max=20)], render_kw={
+                                                                            "placeholder": "mail@example.com"})
     password = PasswordField(validators=[
                              InputRequired(), Length(min=8, max=20)], render_kw={"placeholder": "Password"})
 
@@ -67,27 +89,55 @@ def home():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # first check if user already has token in cookies
+    cookie_token = request.cookies.get('LOGIN_INFO')
+    if cookie_token:
+        # then check if session is active in restapi, redirect to dashboard
+        response = api_session_check(cookie_token)
+        if response.status_code == 200:
+            return redirect(url_for('dashboard'))
+
     form = LoginForm()
     if form.validate_on_submit():
-        user = Users.query.filter_by(username=form.username.data).first()
-        if user:
-            if bcrypt.check_password_hash(user.password, form.password.data):
-                login_user(user)
-                return redirect(url_for('dashboard'))
+        print(f'api_url: {api_url}/login')  # TMP
+        response = requests.get(api_url+'/login', json={
+                                                        'email': form.email.data,
+                                                        'password': form.password.data,
+                                                        })
+        if response.status_code == 200:
+            token = response.json()['token']
+            print(f"token: {token}")  # TMP
+
+            # setting up cookies
+            response_with_cookie = make_response(redirect(url_for('dashboard')))
+
+            # 30 days -> TODO set max_age using config variable same as TOKEN_EXPIRE_HOURS
+            response_with_cookie.set_cookie('LOGIN_INFO', token, max_age=30*24*3600)
+
+            return response_with_cookie
+        else:  # TMP debug info
+            flash(f'Login failed: {response.json()["message"]}')
+            print(f'response.content: {response.content}')
+            print(f'response.text: {response.text}')
+            print(f'response.status_code: {response.status_code}')
+            print(f'response.reason: {response.reason}')
+
     return render_template('login.html', form=form)
 
 
 @app.route('/dashboard', methods=['GET', 'POST'])
 @login_required
-def dashboard():
+def dashboard(token):
+    print(f'dashboard token: {token}')  # TMP
     return render_template('dashboard.html')
 
 
 @app.route('/logout', methods=['GET', 'POST'])
 @login_required
-def logout():
-    logout_user()
-    return redirect(url_for('login'))
+def logout(token):  # FIXME logout func doesn't not work without it (fix wrapper?)
+    response_with_cookie = make_response(redirect(url_for('login')))
+    response_with_cookie.set_cookie('LOGIN_INFO', '', max_age=0)  # delete cookie
+    return response_with_cookie
 
 
 @ app.route('/register', methods=['GET', 'POST'])
@@ -95,16 +145,50 @@ def register():
     form = RegisterForm()
 
     if form.validate_on_submit():
-        hashed_password = bcrypt.generate_password_hash(form.password.data).decode('utf8')
-        # .decode is necessary here because of Postgres saving methods
+        print(f'api_url: {api_url}/register')  # TMP
+        # TODO encrypt password (now we're sending it as plain text)
+        response = requests.post(api_url + '/register', json={
+            'username': form.username.data,
+            'email': form.email.data,
+            'password': form.password.data,
+        })
+        if response.status_code == 200:
+            flash(f'User registered. Check your email for activation code', 'success')
+            return redirect(url_for('activate'))
 
-        new_user = Users(username=form.username.data, password=hashed_password)
-        db.session.add(new_user)
-        db.session.commit()
-        return redirect(url_for('login'))
+        flash(f'Error while registering user, please try again: {response.json()["message"]}')
+
+        return redirect(url_for('register'))
 
     return render_template('register.html', form=form)
 
 
+@app.route('/activate', methods=['GET', 'POST'])
+def activate():
+    form = ActivationForm()
+    if form.validate_on_submit():
+        response = requests.put(api_url + '/activate', json={
+            'activation_code': form.activation_code.data,
+
+        })
+        if response.status_code == 200:
+            flash(f'User activated successfully, login please', 'success')
+            return redirect(url_for('login'))
+        else:
+            flash(f'Error while activating user, please try again: {response.json()["message"]}')
+            return redirect(url_for('activate'))
+
+    return render_template('activate.html', form=form)
+
+
+@app.route('/admin', methods=['GET', 'POST'])
+def admin():
+
+    pass
+
+
 if __name__ == "__main__":
     app.run(debug=True)
+
+
+# based on: https://github.com/arpanneupane19/Python-Flask-Authentication-Tutorial/blob/main/app.py
