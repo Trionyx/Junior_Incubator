@@ -17,6 +17,6 @@ Required features for MVP:
 All pieces of project could be discussed and changed
 
 # CURRENT TASK:
-Create password recovery page
-Deploy project to hosting
-Find more suitable mail-server
+- Create password recovery page
+- Deploy project to hosting
+- Find more suitable mail-server
